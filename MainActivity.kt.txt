@@ -1,0 +1,270 @@
+package com.example.proyecto_3_kotlin
+
+import android.content.Intent
+import android.graphics.*
+import android.net.Uri
+import android.os.Bundle
+import android.provider.MediaStore
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import java.io.File
+
+data class Tr(val p: PointF?, val c: Int)
+data class Tx(var t: String, var o: PointF, var c: Int, val s: Int)
+
+class MainActivity : AppCompatActivity() {
+    private val imgs = mutableListOf("foto1", "foto2", "foto3", "foto4", "foto5", "foto6", "foto7", "foto8", "foto9")
+    private val favs = mutableSetOf<String>()
+    private val edits = mutableMapOf<String, File>()
+    private val filtros = mutableMapOf<String, ColorMatrix?>()
+    private val rots = mutableMapOf<String, Float>()
+
+    private var idx = 0
+    private var est = 0
+    private var stTxt = 0
+    private var vFav = false
+    private val trazos = mutableListOf<Tr>()
+    private val textos = mutableListOf<Tx>()
+    private var txtSel: Tx? = null
+    private var col = Color.RED
+    private val paleta = listOf(Color.RED, Color.rgb(255,165,0), Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.rgb(128,0,128), Color.MAGENTA, Color.WHITE, Color.BLACK)
+
+    private val pickImageLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.data?.let { uri ->
+                val path = uri.toString()
+                imgs.add(path)
+                idx = if (vFav) imgs.filter { favs.contains(it) }.size - 1 else imgs.size - 1
+                vFav = false
+                actualizarVista()
+            }
+        }
+    }
+
+    private lateinit var contenedor: FrameLayout
+    private lateinit var scrollTop: HorizontalScrollView
+    private lateinit var layoutTop: LinearLayout
+    private lateinit var layoutPaleta: LinearLayout
+    private lateinit var layoutBot: LinearLayout
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+        }
+
+        contenedor = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+
+        layoutBot = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(10, 10, 10, 25)
+        }
+
+        root.addView(contenedor)
+        root.addView(layoutBot)
+        setContentView(root)
+
+        actualizarVista()
+    }
+
+    private fun rst() { trazos.clear(); textos.clear(); txtSel = null; }
+
+    private fun cur(): String? {
+        val lista = if (vFav) imgs.filter { favs.contains(it) } else imgs
+        return if (lista.isNotEmpty()) lista[idx.coerceIn(0, lista.size - 1)] else null
+    }
+
+    private fun actualizarVista() {
+        val scrollPos = if (::scrollTop.isInitialized) scrollTop.scrollX else 0
+        val c = cur()
+        val isF = c != null && favs.contains(c)
+
+        contenedor.removeAllViews()
+
+        if (c != null) {
+            val view = EditorView(this, c)
+            contenedor.addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+
+        val topContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.TOP
+                setMargins(0, 80, 0, 0)
+            }
+        }
+
+        layoutTop = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+
+        scrollTop = HorizontalScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            addView(layoutTop)
+        }
+        topContainer.addView(scrollTop)
+
+        layoutPaleta = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 10, 0, 10)
+            visibility = if (est == 2 || est == 5) View.VISIBLE else View.GONE
+        }
+        construirPaleta()
+        topContainer.addView(layoutPaleta)
+
+        contenedor.addView(topContainer)
+
+        layoutBot.visibility = if (est == 0) View.VISIBLE else View.GONE
+
+        when (est) {
+            0 -> {
+                addBtn(layoutTop, "✏️ Editar") { est = 1; actualizarVista() }
+                addBtn(layoutTop, if (isF) "❤️ Fav" else "🤍 Fav") { c?.let { if (isF) favs.remove(it) else favs.add(it); actualizarVista() } }
+                addBtn(layoutTop, "🗑️ Borrar") { c?.let { imgs.remove(it); favs.remove(it); edits.remove(it); if (vFav && favs.isEmpty()) vFav = false; actualizarVista() } }
+
+                layoutBot.removeAllViews()
+                addBtn(layoutBot, "◀") { val l = if(vFav) imgs.filter{favs.contains(it)} else imgs; if(l.isNotEmpty()) { idx = (idx - 1 + l.size) % l.size; rst(); actualizarVista() } }
+                addBtn(layoutBot, "Gal") { pickImageLauncher.launch(Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)) }
+                addBtn(layoutBot, if (vFav) "Volver" else "⭐") { if(vFav || favs.isNotEmpty()) { vFav = !vFav; idx = 0; actualizarVista() } }
+                addBtn(layoutBot, "▶") { val l = if(vFav) imgs.filter{favs.contains(it)} else imgs; if(l.isNotEmpty()) { idx = (idx + 1) % l.size; rst(); actualizarVista() } }
+            }
+            1 -> {
+                addBtn(layoutTop, "🔄 Rotar") { c?.let { rots[it] = (rots[it] ?: 0f) + 90f; actualizarVista() } }
+                addBtn(layoutTop, "🖌️ Pincel") { est = 2; actualizarVista() }
+                addBtn(layoutTop, "🔤 Texto") { est = 5; actualizarVista() }
+                addBtn(layoutTop, "🎨 Filtros") { est = 4; actualizarVista() }
+                addBtn(layoutTop, "✅ Listo") { est = 0; actualizarVista() }
+                addBtn(layoutTop, "❌ Cancelar") { c?.let { filtros.remove(it); rots.remove(it) }; est = 0; rst(); actualizarVista() }
+            }
+            2, 5 -> {
+                addBtn(layoutTop, "❌") { est = 1; actualizarVista() }
+                addBtn(layoutTop, "✅") { est = 1; actualizarVista() }
+                if (est == 5) {
+                    addBtn(layoutTop, "Normal") { pedirTexto(0) }
+                    addBtn(layoutTop, "Fondo") { pedirTexto(1) }
+                    addBtn(layoutTop, "Subrayado") { pedirTexto(2) }
+                }
+            }
+            4 -> {
+                addBtn(layoutTop, "❌") { est = 1; actualizarVista() }
+                addBtn(layoutTop, "✅") { est = 1; actualizarVista() }
+                addBtn(layoutTop, "B&N") { c?.let { filtros[it] = ColorMatrix().apply { setSaturation(0f) }; actualizarVista() } }
+                addBtn(layoutTop, "Sepia") { c?.let { filtros[it] = ColorMatrix(floatArrayOf(0.393f,0.769f,0.189f,0f,0f, 0.349f,0.686f,0.168f,0f,0f, 0.272f,0.534f,0.131f,0f,0f, 0f,0f,0f,1f,0f)); actualizarVista() } }
+                addBtn(layoutTop, "Invertido") { c?.let { filtros[it] = ColorMatrix(floatArrayOf(-1f,0f,0f,0f,255f, 0f,-1f,0f,0f,255f, 0f,0f,-1f,0f,255f, 0f,0f,0f,1f,0f)); actualizarVista() } }
+            }
+        }
+
+        scrollTop.post { scrollTop.scrollTo(scrollPos, 0) }
+    }
+
+    private fun addBtn(parent: LinearLayout, txt: String, onClick: () -> Unit) {
+        parent.addView(Button(this).apply { text = txt; setOnClickListener { onClick() }; layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(6,0,6,0) } })
+    }
+
+    private fun construirPaleta() {
+        layoutPaleta.removeAllViews()
+        for (color in paleta) {
+            val v = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(70, 70).apply { setMargins(8, 0, 8, 0) }
+                setBackgroundColor(color)
+                setOnClickListener { col = color; if (est == 5) txtSel?.let { it.c = color } }
+            }
+            layoutPaleta.addView(v)
+        }
+    }
+
+    private fun pedirTexto(estilo: Int) {
+        val input = EditText(this)
+        AlertDialog.Builder(this).setTitle("Texto").setView(input).setPositiveButton("OK") { _, _ ->
+            if (input.text.isNotEmpty()) {
+                val t = Tx(input.text.toString(), PointF(300f, 400f), col, estilo)
+                textos.add(t)
+                txtSel = t
+                est = 1
+                actualizarVista()
+            }
+        }.setNegativeButton("Cancelar", null).show()
+    }
+
+    inner class EditorView(context: android.content.Context, private val path: String) : View(context) {
+        private val paint = Paint().apply { strokeWidth = 10f; strokeCap = Paint.Cap.ROUND; style = Paint.Style.STROKE }
+        private var lastX = 0f
+        private var lastY = 0f
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val rot = rots[path] ?: 0f
+
+            canvas.save()
+            canvas.rotate(rot, width / 2f, height / 2f)
+
+            val bmp = if (edits.containsKey(path)) BitmapFactory.decodeFile(edits[path]!!.absolutePath)
+            else if (path.startsWith("content://")) MediaStore.Images.Media.getBitmap(contentResolver, Uri.parse(path))
+            else {
+                val resId = resources.getIdentifier(path, "drawable", packageName)
+                if (resId != 0) BitmapFactory.decodeResource(resources, resId) else null
+            }
+
+            bmp?.let {
+                val matrix = Matrix().apply { setRectToRect(RectF(0f, 0f, it.width.toFloat(), it.height.toFloat()), RectF(0f, 0f, width.toFloat(), height.toFloat()), Matrix.ScaleToFit.CENTER) }
+                val pBmp = Paint().apply { filtros[path]?.let { colorFilter = ColorMatrixColorFilter(it) } }
+                canvas.drawBitmap(it, matrix, pBmp)
+            }
+
+            for (i in 0 until trazos.size - 1) {
+                val t1 = trazos[i]; val t2 = trazos[i+1]
+                if (t1.p != null && t2.p != null) {
+                    paint.color = t1.c
+                    canvas.drawLine(t1.p!!.x, t1.p!!.y, t2.p!!.x, t2.p!!.y, paint)
+                }
+            }
+
+            for (t in textos) {
+                val tp = Paint().apply { textSize = 64f; color = t.c; isAntiAlias = true; typeface = Typeface.DEFAULT_BOLD }
+                val w = tp.measureText(t.t)
+                if (t.s == 1) canvas.drawRect(t.o.x - 10, t.o.y - 50, t.o.x + w + 10, t.o.y + 20, Paint().apply { color = if(t.c == Color.BLACK) Color.WHITE else Color.BLACK })
+                if (t.s == 2) canvas.drawLine(t.o.x, t.o.y + 30, t.o.x + w, t.o.y + 30, Paint().apply { color = t.c; strokeWidth = 6f })
+                canvas.drawText(t.t, t.o.x, t.o.y, tp)
+            }
+            canvas.restore()
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            val pt = PointF(event.x, event.y)
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    lastX = event.x
+                    lastY = event.y
+                    if (est == 2) trazos.add(Tr(pt, col))
+                    else if (est == 5) txtSel = textos.firstOrNull { Math.hypot((it.o.x - pt.x).toDouble(), (it.o.y - pt.y).toDouble()) < 150 }
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (est == 2) {
+                        trazos.add(Tr(pt, col))
+                    } else if (est == 5 && txtSel != null) {
+                        val dx = event.x - lastX
+                        val dy = event.y - lastY
+                        txtSel!!.o.x += dx
+                        txtSel!!.o.y += dy
+                        lastX = event.x
+                        lastY = event.y
+                    }
+                }
+                MotionEvent.ACTION_UP -> if (est == 2) trazos.add(Tr(null, col))
+            }
+            invalidate()
+            return true
+        }
+    }
+}
